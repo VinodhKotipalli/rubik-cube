@@ -1,9 +1,10 @@
 from datetime import datetime
 from os import path 
 import abc
+import multiprocessing
 import random
 
-from anytree import *
+from anytree import AnyNode
 
 import numpy as np
 
@@ -604,18 +605,10 @@ class Rubik(object):
 			self.state = np.copy(newState)
 
 
-if __name__ == '__main__':
-	
-	filedir = path.dirname(path.abspath(__file__)).replace('\\', '/').replace('C:', '')
-	maxKValues = {2:99988, 3:224988, 4:399988, 5:624988}
-	# #maxKValues = {2:100, 3:100, 4:100, 5:100}
-	minActions = {2:1, 3:1, 4:1, 5:1}
-	maxActions = {2:100, 3:100, 4:100, 5:100}
-	
-	for m in range(2, 6):
+def generateData(m, maxKValues, minActions, maxActions, filedir, returnDict):	
+		result = dict()
 		n = m
-		e = 6 + (m - 2) * 2 + (n - 2)
-		
+		e = 6 + (m - 2) * 2 + (n - 2)		
 		allowedActionMin = 0
 		allowedActionMax = 2 * e - 1
 				
@@ -626,7 +619,7 @@ if __name__ == '__main__':
 		outpath = filedir + '/basic' + str(m) + 'x' + str(n) + 'RubikCube.csv'
 	
 		t1 = datetime.now()
-		print('\n=================================================================================================')
+		# print('\n=================================================================================================')
 		print("Generating data for Basic %dx%d Rubik's Cube" % (m, n))
 
 		f = open(outpath, 'w')
@@ -681,6 +674,7 @@ if __name__ == '__main__':
 	
 		t2 = datetime.now()
 		delta = t2 - t1
+		result.update({'First Pass:Machine-Time':delta.total_seconds()})
 		print("First Pass:Finished generating data for Basic %dx%d Rubik's Cube:\n\tRun Time = % d sec" % (m, n, delta.total_seconds()))
 		# print(RenderTree(root))
 		print("Consolidating generated Tree Data for Basic %dx%d Rubik's Cube" % (m, n))
@@ -697,7 +691,7 @@ if __name__ == '__main__':
 			# iNodes = findall_by_attr(root, value=i, name='depth')	
 			for iNode in iNodes:	
 				oldState = iNode.state
-				for a in range(allowedActionMax):
+				for a in range(allowedActionMax + 1):
 					randomCube.setState(oldState.split(','))
 					edge = a % ((allowedActionMax + 1) / e)
 					action = int(a / e)
@@ -721,6 +715,7 @@ if __name__ == '__main__':
 		print('\tEnding: Tree Height = %d' % root.height)
 		t2 = datetime.now()
 		delta = t2 - t1
+		result.update({'Tree Consolidation:Machine-Time':delta.total_seconds()})
 		print("Finished Consolidating generated Tree Data for Basic %dx%d Rubik's Cube:\n\tRun Time = % d sec" % (m, n, delta.total_seconds()))		
 		t1 = t1
 		outpath = filedir + '/basic' + str(m) + 'x' + str(n) + 'RubikCubeOptimized.csv'
@@ -742,4 +737,38 @@ if __name__ == '__main__':
 			
 		t2 = datetime.now()
 		delta = t2 - t1
-		print("Second Pass:Finished generating data for Basic %dx%d Rubik's Cube:\n\tRun Time = % d sec" % (m, n, delta.total_seconds()))
+		result.update({'Second Pass:Machine-Time':delta.total_seconds()})		
+		print("Second Pass:Finished generating data for Basic %dx%d Rubik's Cube:\n\tRun Time = %d sec" % (m, n, delta.total_seconds()))
+
+		returnDict.update({m:result}) 
+
+
+if __name__ == '__main__':
+	
+	filedir = path.dirname(path.abspath(__file__)).replace('\\', '/').replace('C:', '')
+	maxKValues = {2:99988, 3:224988, 4:399988, 5:624988}
+	# #maxKValues = {2:100, 3:100, 4:100, 5:100}
+	minActions = {2:1, 3:1, 4:1, 5:1}
+	maxActions = {2:100, 3:100, 4:100, 5:100}
+	
+	manager = multiprocessing.Manager()
+	returnDict = manager.dict()
+	
+	jobs = dict()
+	t1 = datetime.now()
+	print('=================================================================================================')
+	
+	for m in range(2, 6):
+		jobs.update({m:multiprocessing.Process(target=generateData , args=(m, maxKValues, minActions, maxActions, filedir, returnDict))})
+		jobs[m].start()
+	
+	for m in range(2, 6):
+		jobs[m].join()
+	for m in range(2, 6):
+		print("Run-Time statistics for Basic %dx%d Rubik's Cube:" % (m, m))
+		for key in returnDict.get(m).keys():
+			print('\t%s = %6d sec' % (key, returnDict.get(m)[key]))
+	t2 = datetime.now()
+	delta = t2 - t1
+	print('=================================================================================================')
+	print("Finished generating data for all the Rubik's Cubes:\n\tRun Time(Clock) = % d sec" % delta.total_seconds())

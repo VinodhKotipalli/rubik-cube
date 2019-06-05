@@ -620,7 +620,7 @@ def generateData(m, maxKValues, minActions, maxActions, filedir, returnDict):
 	
 		t1 = datetime.now()
 		# print('\n=================================================================================================')
-		print("Generating data for Basic %dx%d Rubik's Cube" % (m, n))
+		print("\nGenerating data for Basic %dx%d Rubik's Cube" % (m, n))
 
 		f = open(outpath, 'w')
 		randomCube = Rubik(size=[m, n])
@@ -639,7 +639,7 @@ def generateData(m, maxKValues, minActions, maxActions, filedir, returnDict):
 				kRootId = 'SolvedState:' + str(solvedStateId)
 				solvedStateId = solvedStateId + 1
 				kRoot = AnyNode(id=kRootId, parent=root, state=kSolveState)
-				treeData.update({kSolveState:{'node':kRoot, 'parent':root}})
+				treeData.update({kSolveState:{'node':kRoot, 'parent':root, 'exploredActions':list(), 'exploredActionsInFirstPass':list() }})
 				data.update({kRootId:kSolveState})
 				f.write('0,' + kSolveState + '\n')
 				
@@ -652,9 +652,11 @@ def generateData(m, maxKValues, minActions, maxActions, filedir, returnDict):
 						newNode = treeData[newState]['node']
 					except:
 						oldNode = treeData[oldState]['node']
+						treeData[oldState]['exploredActions'].append(randomCube.latestAction)
+						treeData[oldState]['exploredActionsInFirstPass'].append(randomCube.latestAction)
 						newNodeId = 'Action:' + str(randomCube.latestAction)
 						newNode = AnyNode(id=newNodeId, parent=oldNode, state=newState)
-						treeData.update({newState:{'node':newNode, 'parent':oldNode}})
+						treeData.update({newState:{'node':newNode, 'parent':oldNode, 'exploredActions':list(), 'exploredActionsInFirstPass':list()}})
 
 				try:
 					key = list(data.values()).index(newState)
@@ -674,16 +676,25 @@ def generateData(m, maxKValues, minActions, maxActions, filedir, returnDict):
 	
 		t2 = datetime.now()
 		delta = t2 - t1
-		result.update({'First Pass:Machine-Time':delta.total_seconds()})
-		print("First Pass:Finished generating data for Basic %dx%d Rubik's Cube:\n\tRun Time = % d sec" % (m, n, delta.total_seconds()))
+		result.update({'First Pass:Machine-Time(sec)                ':delta.total_seconds()})
+		
+		print("\nFirst Pass:Finished generating data for Basic %dx%d Rubik's Cube:Run Time = % d sec" % (m, n, delta.total_seconds()))
 		# print(RenderTree(root))
-		print("Consolidating generated Tree Data for Basic %dx%d Rubik's Cube" % (m, n))
+		print("\nConsolidating generated Tree Data for Basic %dx%d Rubik's Cube" % (m, n))
+		result.update({'\n\tPre Consolidation:Tree Height               ':root.height})
+
 		t1 = t2
 
 		f.close()
 		i = 1
 		iParentNodes = [root] 
-		print('\tStarting: Tree Height = %d' % root.height)
+		# print('\tStarting: Tree Height = %d' % root.height)
+		allNodes = 0
+		fullNodes = 0
+		partialNodes = 0
+		fullNodesInFirstPass = 0
+		partialNodesInFirstPass = 0
+
 		while i <= root.height:
 			iNodes = []
 			for pNode in iParentNodes:
@@ -691,7 +702,9 @@ def generateData(m, maxKValues, minActions, maxActions, filedir, returnDict):
 			# iNodes = findall_by_attr(root, value=i, name='depth')	
 			for iNode in iNodes:	
 				oldState = iNode.state
-				for a in range(allowedActionMax + 1):
+				exploredActions = treeData[oldState]['exploredActions']
+				unexploredActions = [action for action in range(allowedActionMax + 1) if action not in exploredActions]
+				for a in unexploredActions:
 					randomCube.setState(oldState.split(','))
 					edge = a % ((allowedActionMax + 1) / e)
 					action = int(a / e)
@@ -709,14 +722,29 @@ def generateData(m, maxKValues, minActions, maxActions, filedir, returnDict):
 							iNode_a.parent = None
 							iNode_a.parent = newParent
 							treeData[newState]['parent'] = newParent
+							treeData[oldState]['exploredActions'].append(a)
+				allNodes = allNodes + 1
+				if len(treeData[oldState]['exploredActions']) == allowedActionMax + 1:
+					fullNodes = fullNodes + 1
+				else:
+					partialNodes = partialNodes + 1
+				
+				if len(treeData[oldState]['exploredActionsInFirstPass']) == allowedActionMax + 1:
+					fullNodesInFirstPass = fullNodesInFirstPass + 1
+				else:
+					partialNodesInFirstPass = partialNodesInFirstPass + 1
+					
 			iParentNodes = iNodes
 			i = i + 1
-			
-		print('\tEnding: Tree Height = %d' % root.height)
+		result.update({'Post Consolidation:Tree Height              ':root.height})
+	
+		# print('\tEnding: Tree Height = %d' % root.height)
+
 		t2 = datetime.now()
 		delta = t2 - t1
-		result.update({'Tree Consolidation:Machine-Time':delta.total_seconds()})
-		print("Finished Consolidating generated Tree Data for Basic %dx%d Rubik's Cube:\n\tRun Time = % d sec" % (m, n, delta.total_seconds()))		
+		result.update({'Tree Consolidation:Machine-Time(sec)        ':delta.total_seconds()})
+
+		print("\nFinished Consolidating generated Tree Data for Basic %dx%d Rubik's Cube:Run Time = %d sec" % (m, n, delta.total_seconds()))		
 		t1 = t1
 		outpath = filedir + '/basic' + str(m) + 'x' + str(n) + 'RubikCubeOptimized.csv'
 		f = open(outpath, 'w')
@@ -737,8 +765,19 @@ def generateData(m, maxKValues, minActions, maxActions, filedir, returnDict):
 			
 		t2 = datetime.now()
 		delta = t2 - t1
-		result.update({'Second Pass:Machine-Time':delta.total_seconds()})		
-		print("Second Pass:Finished generating data for Basic %dx%d Rubik's Cube:\n\tRun Time = %d sec" % (m, n, delta.total_seconds()))
+		result.update({'\n\tSecond Pass:Machine-Time(sec)               ':delta.total_seconds()})		
+
+		result.update({'\n\tTotal Nodes in the Tree                     ':allNodes})
+
+		result.update({'Pre Consolidation:Fully Explored Nodes      ':fullNodesInFirstPass})
+		result.update({'Pre Consolidation:Partially Explored Nodes  ':partialNodesInFirstPass})
+		result.update({'Pre Consolidation:% of Fully Explored Nodes ':int(100 * fullNodesInFirstPass / allNodes)})
+			
+		result.update({'\n\tPost Consolidation:Fully Explored Nodes     ':fullNodes})
+		result.update({'Post Consolidation:Partially Explored Nodes ':partialNodes})
+		result.update({'Post Consolidation:% of Fully Explored Nodes':int(100 * fullNodes / allNodes)})
+		
+		print("\nSecond Pass:Finished generating data for Basic %dx%d Rubik's Cube:Run Time = %d sec" % (m, n, delta.total_seconds()))
 
 		returnDict.update({m:result}) 
 
@@ -747,7 +786,7 @@ if __name__ == '__main__':
 	
 	filedir = path.dirname(path.abspath(__file__)).replace('\\', '/').replace('C:', '')
 	maxKValues = {2:99988, 3:224988, 4:399988, 5:624988}
-	# #maxKValues = {2:100, 3:100, 4:100, 5:100}
+	# maxKValues = {2:100, 3:100, 4:100, 5:100}
 	minActions = {2:1, 3:1, 4:1, 5:1}
 	maxActions = {2:100, 3:100, 4:100, 5:100}
 	
@@ -765,10 +804,11 @@ if __name__ == '__main__':
 	for m in range(2, 6):
 		jobs[m].join()
 	for m in range(2, 6):
+		print('=================================================================================================')		
 		print("Run-Time statistics for Basic %dx%d Rubik's Cube:" % (m, m))
 		for key in returnDict.get(m).keys():
-			print('\t%s = %6d sec' % (key, returnDict.get(m)[key]))
+			print('\t%s = %10d' % (key, returnDict.get(m)[key]))
 	t2 = datetime.now()
 	delta = t2 - t1
 	print('=================================================================================================')
-	print("Finished generating data for all the Rubik's Cubes:\n\tRun Time(Clock) = % d sec" % delta.total_seconds())
+	print("Finished generating data for all the Rubik's Cubes:Run Time(Clock) = % d sec" % delta.total_seconds())

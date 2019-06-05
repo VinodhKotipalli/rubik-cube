@@ -785,6 +785,7 @@ def generateData(m, maxKValues, minActions, maxActions, filedir, returnDict):
 if __name__ == '__main__':
 	
 	filedir = path.dirname(path.abspath(__file__)).replace('\\', '/').replace('C:', '')
+	
 	maxKValues = {2:99988, 3:224988, 4:399988, 5:624988}
 	# maxKValues = {2:100, 3:100, 4:100, 5:100}
 	minActions = {2:1, 3:1, 4:1, 5:1}

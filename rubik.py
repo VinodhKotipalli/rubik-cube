@@ -5,6 +5,7 @@ import multiprocessing
 import random
 
 from anytree import AnyNode
+from numba import jit
 
 import numpy as np
 
@@ -512,7 +513,7 @@ class Rubik(object):
 		e = 6 + (m - 2) * 2 + (n - 2)		
 		for i in range(count):
 			r = random.randint(low, high)
-			edge = r % ((high + 1) / e)
+			edge = int(r / ((high + 1) / e))
 			action = int(r / e)
 			self.doAction(edge, action)
 		self.latestAction = r
@@ -605,6 +606,77 @@ class Rubik(object):
 			self.state = np.copy(newState)
 
 
+def consolidateTreeForNode(jNode, treeData, allowedActionMax, m, n, e, nodeDepth, exploreAllActions):
+	oldState = jNode.state
+	if exploreAllActions:
+		jCube = Rubik(size=[m, n])
+		exploredActions = treeData[oldState]['exploredActions']
+		unexploredActions = [action for action in range(allowedActionMax + 1) if action not in exploredActions]
+		for a in unexploredActions:
+			jCube.setState(oldState.split(','))
+			edge = int(a / ((allowedActionMax + 1) / e))
+			action = int(a / e)
+			jCube.doAction(edge, action)
+			newState = jCube.stateInCsv()
+			if newState in list(treeData.keys()):
+				jNode_a = treeData[newState]['node']
+				oldParent = treeData[newState]['parent']
+				newParent = jNode
+				if oldParent != jNode and oldParent.depth > nodeDepth:
+					jNode_a.id = 'Action:' + str(a)
+					# #detach iNode_a from children of oldParent
+					oldParent.children = [c for c in oldParent.children if c.state != jNode_a.state]
+					# #attache of iNode_a to children of newParent 
+					jNode_a.parent = None
+					jNode_a.parent = newParent
+					treeData[newState]['parent'] = newParent
+					treeData[oldState]['exploredActions'].append(a)
+		
+	return [treeData, oldState]
+
+
+def consolidateTree(root, treeData, allowedActionMax, m, n, exploreAllActions=False):
+		i = 1
+		iParentNodes = [root] 
+		# print('\tStarting: Tree Height = %d' % root.height)
+		allNodes = 0
+		fullNodes = 0
+		partialNodes = 0
+		exploredNodeActions = 0
+		
+		fullNodesInFirstPass = 0
+		partialNodesInFirstPass = 0
+		exploredNodeActionsInFirstPass = 0
+		
+		e = 6 + (m - 2) * 2 + (n - 2)		
+
+		while i <= root.height:
+			iNodes = []
+			for pNode in iParentNodes:
+				iNodes = iNodes + [c for c in pNode.children]
+			# iNodes = findall_by_attr(root, value=i, name='depth')	
+			for jNode in iNodes:	
+				[treeData, oldState] = consolidateTreeForNode(jNode, treeData, allowedActionMax, m, n, e, i, exploreAllActions)
+				exploredNodeActions = exploredNodeActions + len(treeData[oldState]['exploredActions'])
+				if len(treeData[oldState]['exploredActions']) == allowedActionMax + 1:
+					fullNodes = fullNodes + 1
+				else:
+					partialNodes = partialNodes + 1
+				
+				exploredNodeActionsInFirstPass = exploredNodeActionsInFirstPass + len(treeData[oldState]['exploredActionsInFirstPass'])				
+				if len(treeData[oldState]['exploredActionsInFirstPass']) == allowedActionMax + 1:
+					fullNodesInFirstPass = fullNodesInFirstPass + 1
+				else:
+					partialNodesInFirstPass = partialNodesInFirstPass + 1
+			
+			allNodes = allNodes + len(iNodes)
+		
+			iParentNodes = iNodes
+			i = i + 1
+		
+		return [treeData, allNodes, fullNodes, partialNodes, fullNodesInFirstPass, partialNodesInFirstPass, exploredNodeActions, exploredNodeActionsInFirstPass]
+
+
 def generateData(m, maxKValues, minActions, maxActions, filedir, returnDict):	
 		result = dict()
 		n = m
@@ -673,6 +745,8 @@ def generateData(m, maxKValues, minActions, maxActions, filedir, returnDict):
 						shuffle = False
 					else:
 						minSteps = 0
+
+		f.close()
 	
 		t2 = datetime.now()
 		delta = t2 - t1
@@ -682,60 +756,12 @@ def generateData(m, maxKValues, minActions, maxActions, filedir, returnDict):
 		# print(RenderTree(root))
 		print("\nConsolidating generated Tree Data for Basic %dx%d Rubik's Cube" % (m, n))
 		result.update({'\n\tPre Consolidation:Tree Height               ':root.height})
-
+		
+		consolidatedData = consolidateTree(root, treeData, allowedActionMax, m, n)
+		
+		[treeData, allNodes, fullNodes, partialNodes, fullNodesInFirstPass, partialNodesInFirstPass, exploredNodeActions, exploredNodeActionsInFirstPass] = consolidatedData
 		t1 = t2
 
-		f.close()
-		i = 1
-		iParentNodes = [root] 
-		# print('\tStarting: Tree Height = %d' % root.height)
-		allNodes = 0
-		fullNodes = 0
-		partialNodes = 0
-		fullNodesInFirstPass = 0
-		partialNodesInFirstPass = 0
-
-		while i <= root.height:
-			iNodes = []
-			for pNode in iParentNodes:
-				iNodes = iNodes + [c for c in pNode.children]
-			# iNodes = findall_by_attr(root, value=i, name='depth')	
-			for iNode in iNodes:	
-				oldState = iNode.state
-				exploredActions = treeData[oldState]['exploredActions']
-				unexploredActions = [action for action in range(allowedActionMax + 1) if action not in exploredActions]
-				for a in unexploredActions:
-					randomCube.setState(oldState.split(','))
-					edge = a % ((allowedActionMax + 1) / e)
-					action = int(a / e)
-					randomCube.doAction(edge, action)
-					newState = randomCube.stateInCsv()
-					if newState in list(treeData.keys()):
-						iNode_a = treeData[newState]['node']
-						oldParent = treeData[newState]['parent']
-						newParent = iNode
-						if oldParent != iNode and oldParent.depth > i:
-							iNode_a.id = 'Action:' + str(a)
-							# #detach iNode_a from children of oldParent
-							oldParent.children = [c for c in oldParent.children if c.state != iNode_a.state]
-							# #attache of iNode_a to children of newParent 
-							iNode_a.parent = None
-							iNode_a.parent = newParent
-							treeData[newState]['parent'] = newParent
-							treeData[oldState]['exploredActions'].append(a)
-				allNodes = allNodes + 1
-				if len(treeData[oldState]['exploredActions']) == allowedActionMax + 1:
-					fullNodes = fullNodes + 1
-				else:
-					partialNodes = partialNodes + 1
-				
-				if len(treeData[oldState]['exploredActionsInFirstPass']) == allowedActionMax + 1:
-					fullNodesInFirstPass = fullNodesInFirstPass + 1
-				else:
-					partialNodesInFirstPass = partialNodesInFirstPass + 1
-					
-			iParentNodes = iNodes
-			i = i + 1
 		result.update({'Post Consolidation:Tree Height              ':root.height})
 	
 		# print('\tEnding: Tree Height = %d' % root.height)
@@ -745,7 +771,7 @@ def generateData(m, maxKValues, minActions, maxActions, filedir, returnDict):
 		result.update({'Tree Consolidation:Machine-Time(sec)        ':delta.total_seconds()})
 
 		print("\nFinished Consolidating generated Tree Data for Basic %dx%d Rubik's Cube:Run Time = %d sec" % (m, n, delta.total_seconds()))		
-		t1 = t1
+		t1 = t2
 		outpath = filedir + '/basic' + str(m) + 'x' + str(n) + 'RubikCubeOptimized.csv'
 		f = open(outpath, 'w')
 		minSteps = np.Infinity
@@ -772,10 +798,12 @@ def generateData(m, maxKValues, minActions, maxActions, filedir, returnDict):
 		result.update({'Pre Consolidation:Fully Explored Nodes      ':fullNodesInFirstPass})
 		result.update({'Pre Consolidation:Partially Explored Nodes  ':partialNodesInFirstPass})
 		result.update({'Pre Consolidation:% of Fully Explored Nodes ':int(100 * fullNodesInFirstPass / allNodes)})
+		result.update({'Pre Consolidation:% of Explored Actions     ':int(100 * exploredNodeActionsInFirstPass / (allNodes * (allowedActionMax + 1)))})
 			
 		result.update({'\n\tPost Consolidation:Fully Explored Nodes     ':fullNodes})
 		result.update({'Post Consolidation:Partially Explored Nodes ':partialNodes})
 		result.update({'Post Consolidation:% of Fully Explored Nodes':int(100 * fullNodes / allNodes)})
+		result.update({'Post Consolidation:% of Explored Actions    ':int(100 * exploredNodeActions / (allNodes * (allowedActionMax + 1)))})
 		
 		print("\nSecond Pass:Finished generating data for Basic %dx%d Rubik's Cube:Run Time = %d sec" % (m, n, delta.total_seconds()))
 
@@ -786,8 +814,8 @@ if __name__ == '__main__':
 	
 	filedir = path.dirname(path.abspath(__file__)).replace('\\', '/').replace('C:', '')
 	
-	maxKValues = {2:99988, 3:224988, 4:399988, 5:624988}
-	# maxKValues = {2:100, 3:100, 4:100, 5:100}
+	maxKValues = {2:99988, 3:99988, 4:99988, 5:99988}
+	# maxKValues = {2:1000, 3:1000, 4:100, 5:1000}
 	minActions = {2:1, 3:1, 4:1, 5:1}
 	maxActions = {2:100, 3:100, 4:100, 5:100}
 	
